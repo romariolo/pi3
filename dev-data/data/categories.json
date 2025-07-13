@@ -1,0 +1,22 @@
+[
+    {
+        "name": "Hortaliças",
+        "description": "Vegetais frescos e folhosos da estação.",
+        "icon": "leaf"
+    },
+    {
+        "name": "Frutas",
+        "description": "Frutas da estação, doces e suculentas.",
+        "icon": "apple"
+    },
+    {
+        "name": "Laticínios",
+        "description": "Leite, queijos e derivados produzidos localmente.",
+        "icon": "milk"
+    },
+    {
+        "name": "Comidas Típicas",
+        "description": "Delícias regionais e pratos artesanais.",
+        "icon": "plate"
+    }
+]

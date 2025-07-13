@@ -1,10 +1,9 @@
-// utils/AppError.js
 class AppError extends Error {
     constructor(message, statusCode) {
-        super(message); // Chama o construtor da classe Error
+        super(message);
         this.statusCode = statusCode;
         this.status = `${statusCode}`.startsWith('4') ? 'fail' : 'error';
-        this.isOperational = true; // Erros operacionais são aqueles que podemos prever
+        this.isOperational = true;
 
         Error.captureStackTrace(this, this.constructor);
     }

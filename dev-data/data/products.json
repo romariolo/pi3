@@ -1,0 +1,26 @@
+[
+    {
+        "name": "Tomate Cereja Orgânico",
+        "description": "Tomates pequenos e doces, cultivados sem agrotóxicos.",
+        "price": 8.50,
+        "stock": 100,
+        "unit": "kg",
+        "imageUrl": "/uploads/products/default-tomato.jpg"
+    },
+    {
+        "name": "Queijo Coalho Artesanal",
+        "description": "Queijo coalho fresco e saboroso, feito com leite de cabra.",
+        "price": 25.00,
+        "stock": 50,
+        "unit": "un",
+        "imageUrl": "/uploads/products/default-cheese.jpg"
+    },
+    {
+        "name": "Bolo de Milho Cremoso",
+        "description": "Bolo caseiro de milho, perfeito para o café da tarde.",
+        "price": 15.00,
+        "stock": 20,
+        "unit": "fatia",
+        "imageUrl": "/uploads/products/default-cake.jpg"
+    }
+]

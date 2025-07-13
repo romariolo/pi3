@@ -1,28 +1,34 @@
-// routes/productRoutes.js
 const express = require('express');
-const productController = require('./controllers/productController'); // <-- ESTÁ CORRETO
+const productController = require('../controllers/productController');
 const { protect, restrictTo } = require('../middlewares/authMiddleware');
 const reviewRouter = require('./reviewRoutes');
 
 const router = express.Router();
 
+router.use('/:productId/reviews', reviewRouter);
+
 router.get('/', productController.getAllProducts);
 router.get('/:id', productController.getProductById);
 
-router.use('/:productId/reviews', reviewRouter);
-
 router.use(protect);
 
+router.get('/my', productController.getMyProducts);
+
 router.post('/',
+    restrictTo('admin', 'vendedor'),
     productController.uploadProductImage,
     productController.createProduct
 );
 
-router
-    .route('/:id')
-    .put(productController.uploadProductImage, productController.updateProduct)
-    .delete(productController.deleteProduct);
+router.patch('/:id',
+    restrictTo('admin', 'vendedor'),
+    productController.uploadProductImage, 
+    productController.updateProduct
+);
 
-router.get('/my-products', productController.getAllProducts);
+router.delete('/:id',
+    restrictTo('admin', 'vendedor'),
+    productController.deleteProduct
+);
 
 module.exports = router;

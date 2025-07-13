@@ -1,4 +1,3 @@
-// config/database.js
 const { Sequelize } = require('sequelize');
 require('dotenv').config();
 
@@ -27,5 +26,4 @@ const connectDB = async () => {
     }
 };
 
-// LINHA CORRIGIDA AQUI: Remova o 's' extra
 module.exports = { sequelize, connectDB };

@@ -1,0 +1,26 @@
+[
+    {
+        "name": "Admin Principal",
+        "email": "admin@example.com",
+        "password": "senhaadmin123",
+        "role": "admin",
+        "address": "Rua do Administrador, 100",
+        "phone": "11999999999"
+    },
+    {
+        "name": "Produtor Fazenda Verde",
+        "email": "produtor@example.com",
+        "password": "senhaprodutor123",
+        "role": "vendedor",
+        "address": "Fazenda Verde, Zona Rural",
+        "phone": "11888888888"
+    },
+    {
+        "name": "Comprador Fiel",
+        "email": "comprador@example.com",
+        "password": "senhacomprador123",
+        "role": "user",
+        "address": "Avenida Central, 500",
+        "phone": "11777777777"
+    }
+]

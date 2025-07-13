@@ -1,27 +1,21 @@
-// controllers/productController.js
-const Product = require('../models/Product');
-const User = require('../models/user'); // Certifique-se que o casing está correto (user.js)
-const Category = require('../models/Category');
+const db = require('../models');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/AppError');
 const multer = require('multer');
 const path = require('path');
-const fs = require('fs'); // Para lidar com arquivos do sistema
+const fs = require('fs');
+const { Op } = require('sequelize');
 
-// -----------------------------------------------------
-// Configuração do Multer para upload de imagens
-// -----------------------------------------------------
+const { Product, User, Category } = db;
+
 const multerStorage = multer.diskStorage({
     destination: (req, file, cb) => {
-        const uploadPath = path.join(__dirname, '../uploads/products');
-        // Cria a pasta se não existir
-        // Com recursive: true, ele cria subpastas se necessário
+        const uploadPath = path.join(__dirname, '..', '..', 'uploads', 'products');
         fs.mkdirSync(uploadPath, { recursive: true });
         cb(null, uploadPath);
     },
     filename: (req, file, cb) => {
-        // Gera um nome de arquivo único: product-<timestamp>.<extensao>
-        const ext = file.mimetype.split('/')[1]; // ex: 'jpeg', 'png'
+        const ext = file.mimetype.split('/')[1];
         cb(null, `product-${Date.now()}.${ext}`);
     },
 });
@@ -37,47 +31,59 @@ const multerFilter = (req, file, cb) => {
 const upload = multer({
     storage: multerStorage,
     fileFilter: multerFilter,
-    limits: { fileSize: 5 * 1024 * 1024 } // Limite de 5MB por arquivo
+    limits: { fileSize: 5 * 1024 * 1024 }
 });
 
-// Middleware para upload de UMA imagem (campo 'image')
-// Este middleware será usado nas rotas de criação e atualização de produto
 exports.uploadProductImage = upload.single('image');
 
-// -----------------------------------------------------
-// Funções CRUD para Produtos
-// -----------------------------------------------------
-
-// Criar um novo produto
 exports.createProduct = catchAsync(async (req, res, next) => {
-    const { name, description, price, stock, categoryId } = req.body;
-
-    // O ID do produtor vem do usuário logado (req.user.id)
-    // O middleware 'protect' garante que req.user está disponível
+    const { name, description, price, stock, categoryId, unit, image } = req.body;
     const userId = req.user.id;
 
-    // Verificar se a categoria existe
     const category = await Category.findByPk(categoryId);
     if (!category) {
         return next(new AppError('Categoria não encontrada.', 404));
     }
 
-    // Obter o caminho da imagem se houver upload
     let imageUrl = null;
     if (req.file) {
-        // O caminho salvo deve ser relativo para acesso via URL (ex: /uploads/products/nome_do_arquivo.jpg)
         imageUrl = `/uploads/products/${req.file.filename}`;
+    } else if (image && image.startsWith('data:image')) {
+        try {
+            const base64Data = image.replace(/^data:image\/\w+;base64,/, "");
+            const buffer = Buffer.from(base64Data, 'base64');
+            const ext = image.substring(image.indexOf('/') + 1, image.indexOf(';base64'));
+            const filename = `product-${Date.now()}.${ext}`;
+            const uploadDir = path.join(__dirname, '..', '..', 'uploads', 'products');
+            
+            if (!fs.existsSync(uploadDir)) {
+                fs.mkdirSync(uploadDir, { recursive: true });
+            }
+            
+            const imagePath = path.join(uploadDir, filename);
+            fs.writeFileSync(imagePath, buffer);
+            imageUrl = `/uploads/products/${filename}`;
+        } catch (error) {
+            return next(new AppError('Erro ao processar a imagem. Verifique o formato.', 400));
+        }
     }
 
-    const newProduct = await Product.create({
+    const productData = {
         name,
         description,
         price,
         stock,
         categoryId,
-        userId, // Associa o produto ao usuário logado (produtor)
+        userId,
+        unit,
         imageUrl,
-    });
+    };
+
+    if (stock <= 0) {
+        productData.status = 'indisponivel';
+    }
+
+    const newProduct = await Product.create(productData);
 
     res.status(201).json({
         status: 'success',
@@ -87,10 +93,7 @@ exports.createProduct = catchAsync(async (req, res, next) => {
     });
 });
 
-// Listar todos os produtos (com filtros e paginação opcional)
 exports.getAllProducts = catchAsync(async (req, res, next) => {
-    // Para simplificar a busca e filtros:
-    // Exemplo de uso: /api/products?price[gte]=10&categoryName=Hortaliças&sort=price,asc&page=1&limit=10
     const query = {
         include: [
             { model: User, as: 'producer', attributes: ['id', 'name', 'email', 'phone'] },
@@ -99,7 +102,6 @@ exports.getAllProducts = catchAsync(async (req, res, next) => {
         where: {}
     };
 
-    // Filtragem (ex: name, price[gte], price[lte], categoryId)
     if (req.query.name) {
         query.where.name = { [Op.like]: `%${req.query.name}%` };
     }
@@ -110,11 +112,10 @@ exports.getAllProducts = catchAsync(async (req, res, next) => {
     if (req.query.categoryId) {
         query.where.categoryId = req.query.categoryId;
     }
-    // Para filtrar por nome da categoria, precisaríamos de uma associação mais complexa no 'where'
-    // ou buscar primeiro a categoria pelo nome e usar o ID.
-    // Exemplo: if (req.query.categoryName) { ... }
+    if (req.query.status) {
+        query.where.status = req.query.status;
+    }
 
-    // Ordenação (ex: ?sort=price,-createdAt)
     if (req.query.sort) {
         const sortBy = req.query.sort.split(',').map(field => {
             if (field.startsWith('-')) {
@@ -124,33 +125,28 @@ exports.getAllProducts = catchAsync(async (req, res, next) => {
         });
         query.order = sortBy;
     } else {
-        query.order = [['createdAt', 'DESC']]; // Padrão
+        query.order = [['createdAt', 'DESC']];
     }
 
-    // Paginação
     const page = req.query.page * 1 || 1;
-    const limit = req.query.limit * 1 || 10;
+    const limit = req.query.limit * 1 || 100;
     const offset = (page - 1) * limit;
 
     query.limit = limit;
     query.offset = offset;
 
-    // Para operações de busca (Op.like, Op.gte, etc.)
-    const { Op } = require('sequelize');
-
-
-    const products = await Product.findAll(query);
+    const { count, rows: products } = await Product.findAndCountAll(query);
 
     res.status(200).json({
         status: 'success',
         results: products.length,
+        total: count,
         data: {
             products,
         },
     });
 });
 
-// Obter um produto por ID
 exports.getProductById = catchAsync(async (req, res, next) => {
     const product = await Product.findByPk(req.params.id, {
         include: [
@@ -171,9 +167,8 @@ exports.getProductById = catchAsync(async (req, res, next) => {
     });
 });
 
-// Atualizar um produto (apenas pelo produtor ou admin)
 exports.updateProduct = catchAsync(async (req, res, next) => {
-    const { name, description, price, stock, categoryId } = req.body;
+    const { name, description, price, stock, categoryId, unit, image } = req.body;
 
     const product = await Product.findByPk(req.params.id);
 
@@ -181,31 +176,49 @@ exports.updateProduct = catchAsync(async (req, res, next) => {
         return next(new AppError('Nenhum produto encontrado com este ID para atualizar.', 404));
     }
 
-    // Verifica se o usuário logado é o produtor do produto OU é um admin
     if (product.userId !== req.user.id && req.user.role !== 'admin') {
         return next(new AppError('Você não tem permissão para atualizar este produto.', 403));
     }
 
-    // Se houver nova imagem, processa o upload e remove a antiga (se existir)
     if (req.file) {
-        // Remover a imagem antiga, se existir
         if (product.imageUrl) {
-            const oldImagePath = path.join(__dirname, '..', product.imageUrl);
-            fs.unlink(oldImagePath, (err) => {
-                if (err) console.error('Erro ao deletar imagem antiga:', err);
-            });
+            const oldImagePath = path.join(__dirname, '..', '..', product.imageUrl);
+            if (fs.existsSync(oldImagePath)) fs.unlinkSync(oldImagePath);
         }
         product.imageUrl = `/uploads/products/${req.file.filename}`;
+    } else if (image && image.startsWith('data:image')) {
+        if (product.imageUrl) {
+            const oldImagePath = path.join(__dirname, '..', '..', product.imageUrl);
+            if (fs.existsSync(oldImagePath)) fs.unlinkSync(oldImagePath);
+        }
+        try {
+            const base64Data = image.replace(/^data:image\/\w+;base64,/, "");
+            const buffer = Buffer.from(base64Data, 'base64');
+            const ext = image.substring(image.indexOf('/') + 1, image.indexOf(';base64'));
+            const filename = `product-${Date.now()}.${ext}`;
+            const imagePath = path.join(__dirname, '..', '..', 'uploads', 'products', filename);
+            fs.writeFileSync(imagePath, buffer);
+            product.imageUrl = `/uploads/products/${filename}`;
+        } catch (error) {
+            return next(new AppError('Erro ao processar a nova imagem.', 400));
+        }
     }
 
-    // Atualiza apenas os campos fornecidos
     product.name = name || product.name;
     product.description = description || product.description;
     product.price = price || product.price;
-    product.stock = stock !== undefined ? stock : product.stock; // Permite setar 0
+    product.stock = stock !== undefined ? stock : product.stock;
+    product.unit = unit || product.unit;
     product.categoryId = categoryId || product.categoryId;
+    
+    if (stock !== undefined) {
+        if (stock > 0) {
+            product.status = 'disponivel';
+        } else {
+            product.status = 'indisponivel';
+        }
+    }
 
-    // Se a categoriaId foi alterada, verificar se a nova categoria existe
     if (categoryId && categoryId !== product.categoryId) {
         const newCategory = await Category.findByPk(categoryId);
         if (!newCategory) {
@@ -223,7 +236,6 @@ exports.updateProduct = catchAsync(async (req, res, next) => {
     });
 });
 
-// Deletar um produto (apenas pelo produtor ou admin)
 exports.deleteProduct = catchAsync(async (req, res, next) => {
     const product = await Product.findByPk(req.params.id);
 
@@ -231,17 +243,17 @@ exports.deleteProduct = catchAsync(async (req, res, next) => {
         return next(new AppError('Nenhum produto encontrado com este ID para deletar.', 404));
     }
 
-    // Verifica se o usuário logado é o produtor do produto OU é um admin
     if (product.userId !== req.user.id && req.user.role !== 'admin') {
         return next(new AppError('Você não tem permissão para deletar este produto.', 403));
     }
 
-    // Remove a imagem associada ao produto (se existir)
     if (product.imageUrl) {
-        const imagePath = path.join(__dirname, '..', product.imageUrl);
-        fs.unlink(imagePath, (err) => {
-            if (err) console.error('Erro ao deletar imagem do produto:', err);
-        });
+        const imagePath = path.join(__dirname, '..', '..', product.imageUrl);
+        if (fs.existsSync(imagePath)) {
+            fs.unlink(imagePath, (err) => {
+                if (err) console.error('Erro ao deletar imagem do produto:', err);
+            });
+        }
     }
 
     await product.destroy();
@@ -249,5 +261,23 @@ exports.deleteProduct = catchAsync(async (req, res, next) => {
     res.status(204).json({
         status: 'success',
         data: null,
+    });
+});
+
+exports.getMyProducts = catchAsync(async (req, res, next) => {
+    const products = await Product.findAll({
+        where: { userId: req.user.id },
+        include: [
+            { model: Category, as: 'category', attributes: ['id', 'name'] },
+        ],
+        order: [['createdAt', 'DESC']],
+    });
+
+    res.status(200).json({
+        status: 'success',
+        results: products.length,
+        data: {
+            products,
+        },
     });
 });

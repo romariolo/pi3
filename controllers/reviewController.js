@@ -1,33 +1,23 @@
-// controllers/reviewController.js
 const Review = require('../models/Review');
 const Product = require('../models/Product');
 const User = require('../models/user');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/AppError');
 
-// Criar uma nova avaliação
-// O productId virá dos parâmetros da URL, o userId do token.
 exports.createReview = catchAsync(async (req, res, next) => {
-    // Permite que o ID do produto venha do body (se for rota POST /api/reviews) ou dos params (POST /api/products/:productId/reviews)
     const productId = req.body.productId || req.params.productId;
     const { review, rating } = req.body;
-    const userId = req.user.id; // Quem está criando a review
+    const userId = req.user.id;
 
     if (!productId || !review || !rating) {
         return next(new AppError('Por favor, forneça o ID do produto, a avaliação e a nota.', 400));
     }
 
-    // 1. Verificar se o produto existe
     const productExists = await Product.findByPk(productId);
     if (!productExists) {
         return next(new AppError('Produto não encontrado para esta avaliação.', 404));
     }
 
-    // 2. Verificar se o usuário já avaliou este produto (baseado no hook do modelo)
-    // O hook 'beforeCreate' no modelo Review já cuida disso.
-    // Se o hook disparar um erro, ele será capturado pelo catchAsync.
-
-    // 3. Criar a avaliação
     const newReview = await Review.create({
         review,
         rating,
@@ -43,10 +33,9 @@ exports.createReview = catchAsync(async (req, res, next) => {
     });
 });
 
-// Listar todas as avaliações (pode ser filtrado por produtoId, userId)
 exports.getAllReviews = catchAsync(async (req, res, next) => {
     const filter = {};
-    if (req.params.productId) filter.productId = req.params.productId; // Se a rota for aninhada (ex: /products/:productId/reviews)
+    if (req.params.productId) filter.productId = req.params.productId;
 
     const reviews = await Review.findAll({
         where: filter,
@@ -66,7 +55,6 @@ exports.getAllReviews = catchAsync(async (req, res, next) => {
     });
 });
 
-// Obter uma avaliação por ID
 exports.getReviewById = catchAsync(async (req, res, next) => {
     const review = await Review.findByPk(req.params.id, {
         include: [
@@ -87,7 +75,6 @@ exports.getReviewById = catchAsync(async (req, res, next) => {
     });
 });
 
-// Atualizar uma avaliação (apenas o autor da review ou admin)
 exports.updateReview = catchAsync(async (req, res, next) => {
     const { review: reviewText, rating } = req.body;
 
@@ -97,13 +84,12 @@ exports.updateReview = catchAsync(async (req, res, next) => {
         return next(new AppError('Nenhuma avaliação encontrada com este ID para atualizar.', 404));
     }
 
-    // Autorização: Apenas o usuário que criou a review ou um admin pode atualizá-la
     if (reviewToUpdate.userId !== req.user.id && req.user.role !== 'admin') {
         return next(new AppError('Você não tem permissão para atualizar esta avaliação.', 403));
     }
 
     reviewToUpdate.review = reviewText || reviewToUpdate.review;
-    reviewToUpdate.rating = rating || reviewToUpdate.rating; // Permite atualizar para 0 se o validação permitir
+    reviewToUpdate.rating = rating || reviewToUpdate.rating;
 
     await reviewToUpdate.save();
 
@@ -115,7 +101,6 @@ exports.updateReview = catchAsync(async (req, res, next) => {
     });
 });
 
-// Deletar uma avaliação (apenas o autor da review ou admin)
 exports.deleteReview = catchAsync(async (req, res, next) => {
     const review = await Review.findByPk(req.params.id);
 
@@ -123,7 +108,6 @@ exports.deleteReview = catchAsync(async (req, res, next) => {
         return next(new AppError('Nenhuma avaliação encontrada com este ID para deletar.', 404));
     }
 
-    // Autorização: Apenas o usuário que criou a review ou um admin pode deletá-la
     if (review.userId !== req.user.id && req.user.role !== 'admin') {
         return next(new AppError('Você não tem permissão para deletar esta avaliação.', 403));
     }

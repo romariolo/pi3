@@ -1,6 +1,6 @@
-// server.js
 const express = require('express');
 const dotenv = require('dotenv');
+const cors = require('cors');
 const { connectDB, sequelize } = require('./config/database');
 const globalErrorHandler = require('./middlewares/errorHandler');
 const authRoutes = require('./routes/authRoutes');
@@ -10,29 +10,45 @@ const orderRoutes = require('./routes/orderRoutes');
 const userRoutes = require('./routes/userRoutes');
 const reviewRoutes = require('./routes/reviewRoutes');
 const path = require('path');
+const AppError = require('./utils/AppError');
 
-// Importar todos os modelos para que o Sequelize os reconheça
-const User = require('./models/user');
-// CORREÇÃO AQUI: Removido parêntese extra
+dotenv.config();
+
+const User = require('./models/User');
 const Category = require('./models/Category');
 const Product = require('./models/Product');
 const { Order, OrderItem } = require('./models/Order');
 const Review = require('./models/Review');
 
-dotenv.config();
-
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// =========================================================
-// MIDDLEWARES GLOBAIS
-// =========================================================
-app.use(express.json());
+app.use(cors());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// =========================================================
-// DEFINIÇÃO DAS ROTAS DA API
-// =========================================================
+User.hasMany(Product, { foreignKey: 'userId', as: 'products' });
+User.hasMany(Order, { foreignKey: 'userId', as: 'orders' });
+User.hasMany(Review, { foreignKey: 'userId', as: 'reviews' });
+
+Category.hasMany(Product, { foreignKey: 'categoryId', as: 'products' });
+
+Product.belongsTo(User, { foreignKey: 'userId', as: 'producer' });
+Product.belongsTo(Category, { foreignKey: 'categoryId', as: 'category' });
+Product.hasMany(Review, { foreignKey: 'productId', as: 'reviews' });
+Product.hasMany(OrderItem, { foreignKey: 'productId' });
+
+
+Order.belongsTo(User, { foreignKey: 'userId', as: 'buyer' });
+Order.hasMany(OrderItem, { foreignKey: 'orderId', as: 'orderItems' });
+
+OrderItem.belongsTo(Order, { foreignKey: 'orderId' });
+OrderItem.belongsTo(Product, { as: 'Product', foreignKey: 'productId' });
+
+Review.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+Review.belongsTo(Product, { foreignKey: 'productId', as: 'product' });
+
 app.get('/', (req, res) => {
     res.send('API do Marketplace de Comércio Local está rodando!');
 });
@@ -44,19 +60,16 @@ app.use('/api/orders', orderRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/reviews', reviewRoutes);
 
+app.all('*', (req, res, next) => {
+    next(new AppError(`Não foi possível encontrar ${req.originalUrl} neste servidor!`, 404));
+});
 
-// =========================================================
-// TRATAMENTO DE ERROS GLOBAIS
-// =========================================================
 app.use(globalErrorHandler);
 
-// =========================================================
-// INICIALIZAÇÃO DO SERVIDOR
-// =========================================================
 const startServer = async () => {
     try {
         await connectDB();
-        await sequelize.sync({ force: false });
+        await sequelize.sync({ force: false, alter: true });
         console.log('Todos os modelos foram sincronizados com sucesso com o banco de dados.');
 
         app.listen(PORT, () => {

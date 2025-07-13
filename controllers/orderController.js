@@ -1,106 +1,88 @@
-// controllers/orderController.js
-const { Order, OrderItem } = require('../models/Order'); // Importa ambos os modelos
-const Product = require('../models/Product');
-const User = require('../models/user'); // Casing minúsculo para user.js
+const db = require('../models');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/AppError');
-const { sequelize } = require('../config/database'); // Para transações
 
-// -----------------------------------------------------
-// Funções CRUD para Pedidos
-// -----------------------------------------------------
+const { Order, Product, User, Category, OrderItem } = db;
 
-// Criar um novo pedido (usuário comum - comprador)
 exports.createOrder = catchAsync(async (req, res, next) => {
-    // req.body.products é esperado como um array de objetos:
-    // [{ productId: 1, quantity: 2 }, { productId: 3, quantity: 1 }]
-    const { products: orderProducts, shippingAddress } = req.body;
-    const userId = req.user.id; // ID do comprador logado
+    const { productId, quantity } = req.body;
+    const userId = req.user.id;
 
-    if (!orderProducts || orderProducts.length === 0 || !shippingAddress) {
-        return next(new AppError('Dados de pedido incompletos. Por favor, forneça produtos e endereço de entrega.', 400));
+    if (!productId || !quantity || quantity <= 0) {
+        return next(new AppError('Por favor, forneça um produto e uma quantidade válida.', 400));
     }
 
-    // Usar uma transação para garantir a atomicidade (tudo ou nada)
-    const transaction = await sequelize.transaction();
-
+    const transaction = await db.sequelize.transaction();
     try {
-        let totalAmount = 0;
-        const itemsToCreate = [];
+        const product = await Product.findByPk(productId, { transaction });
 
-        for (const item of orderProducts) {
-            const product = await Product.findByPk(item.productId, { transaction });
-
-            if (!product) {
-                throw new AppError(`Produto com ID ${item.productId} não encontrado.`, 404);
-            }
-            if (product.stock < item.quantity) {
-                throw new AppError(`Estoque insuficiente para o produto "${product.name}". Disponível: ${product.stock}`, 400);
-            }
-
-            // Reduz o estoque do produto
-            product.stock -= item.quantity;
-            await product.save({ transaction });
-
-            const itemPrice = product.price; // Preço do produto no momento da compra
-            totalAmount += itemPrice * item.quantity;
-
-            itemsToCreate.push({
-                productId: product.id,
-                quantity: item.quantity,
-                price: itemPrice, // Armazena o preço no momento da compra
-            });
+        if (!product) {
+            throw new AppError(`Produto com ID ${productId} não encontrado.`, 404);
         }
+        if (product.stock < quantity) {
+            throw new AppError(`Estoque insuficiente para o produto "${product.name}". Disponível: ${product.stock}`, 400);
+        }
+
+        product.stock -= quantity;
+        if (product.stock <= 0) {
+            product.status = 'indisponivel';
+        }
+
+        await product.save({ transaction });
+
+        const totalAmount = product.price * quantity;
 
         const newOrder = await Order.create({
-            userId,
+            userId, 
             totalAmount,
-            shippingAddress,
-            status: 'pending', // Status inicial
+            shippingAddress: 'Venda Local',
+            status: 'delivered',
         }, { transaction });
 
-        // Associa os itens ao pedido recém-criado
-        for (const item of itemsToCreate) {
-            await OrderItem.create({
-                orderId: newOrder.id,
-                productId: item.productId,
-                quantity: item.quantity,
-                price: item.price,
-            }, { transaction });
-        }
+        await OrderItem.create({
+            orderId: newOrder.id,
+            productId: product.id,
+            quantity: quantity,
+            price: product.price,
+        }, { transaction });
 
-        await transaction.commit(); // Confirma a transação
+        await transaction.commit();
+
+        const finalOrder = await Order.findByPk(newOrder.id, {
+             include: [{
+                model: OrderItem,
+                as: 'orderItems'
+            }]
+        });
 
         res.status(201).json({
             status: 'success',
-            message: 'Pedido realizado com sucesso!',
+            message: 'Venda registrada com sucesso!',
             data: {
-                order: newOrder,
+                order: finalOrder,
             },
         });
     } catch (error) {
-        await transaction.rollback(); // Reverte a transação em caso de erro
-        console.error('Erro ao criar pedido:', error);
-        next(error); // Passa o erro para o middleware de tratamento de erros
+        await transaction.rollback();
+        next(error);
     }
 });
 
-// Listar pedidos do usuário logado (comprador)
 exports.getMyOrders = catchAsync(async (req, res, next) => {
     const orders = await Order.findAll({
         where: { userId: req.user.id },
-        include: [
-            {
-                model: OrderItem,
-                as: 'orderItems',
-                include: {
-                    model: Product,
-                    as: 'Product', // 'Product' é o nome padrão do modelo, não 'product'
-                    attributes: ['id', 'name', 'price', 'imageUrl']
-                }
-            },
+        include: [{
+            model: OrderItem,
+            as: 'orderItems',
+            include: {
+                model: Product,
+                as: 'Product',
+                attributes: ['id', 'name', 'price', 'imageUrl', 'unit']
+            }
+        }],
+        order: [
+            ['createdAt', 'DESC']
         ],
-        order: [['createdAt', 'DESC']],
     });
 
     res.status(200).json({
@@ -112,7 +94,7 @@ exports.getMyOrders = catchAsync(async (req, res, next) => {
     });
 });
 
-// Obter detalhes de um pedido específico (para comprador ou produtor/admin)
+
 exports.getOrderById = catchAsync(async (req, res, next) => {
     const order = await Order.findByPk(req.params.id, {
         include: [
@@ -123,7 +105,7 @@ exports.getOrderById = catchAsync(async (req, res, next) => {
                 include: {
                     model: Product,
                     as: 'Product',
-                    attributes: ['id', 'name', 'price', 'imageUrl']
+                    attributes: ['id', 'name', 'price', 'imageUrl', 'unit']
                 }
             },
         ],
@@ -133,21 +115,8 @@ exports.getOrderById = catchAsync(async (req, res, next) => {
         return next(new AppError('Pedido não encontrado.', 404));
     }
 
-    // Autorização: O comprador do pedido OU um admin pode ver o pedido
     if (order.userId !== req.user.id && req.user.role !== 'admin') {
-        // Se for um produtor, ele só deve ver se o pedido contiver algum produto dele
-        const isProducerOfProductsInOrder = await OrderItem.findOne({
-            where: { orderId: order.id },
-            include: {
-                model: Product,
-                as: 'Product',
-                where: { userId: req.user.id }
-            }
-        });
-
-        if (!isProducerOfProductsInOrder) {
-             return next(new AppError('Você não tem permissão para visualizar este pedido.', 403));
-        }
+        return next(new AppError('Você não tem permissão para visualizar este pedido.', 403));
     }
 
     res.status(200).json({
@@ -158,35 +127,53 @@ exports.getOrderById = catchAsync(async (req, res, next) => {
     });
 });
 
-// Listar todos os pedidos (apenas para Admin)
 exports.getAllOrders = catchAsync(async (req, res, next) => {
-    // Implementar filtros se necessário (ex: por status, por compradorId, etc.)
     const orders = await Order.findAll({
-        include: [
-            { model: User, as: 'buyer', attributes: ['id', 'name', 'email', 'phone'] },
-            {
-                model: OrderItem,
-                as: 'orderItems',
+        include: [{
+            model: User,
+            as: 'buyer',
+            attributes: ['id', 'name']
+        }, {
+            model: OrderItem,
+            as: 'orderItems',
+            include: {
+                model: Product,
+                as: 'Product',
+                attributes: ['id', 'name', 'price', 'unit'],
                 include: {
-                    model: Product,
-                    as: 'Product',
-                    attributes: ['id', 'name', 'price', 'imageUrl']
+                    model: Category,
+                    as: 'category',
+                    attributes: ['name']
                 }
-            },
+            }
+        }, ],
+        order: [
+            ['createdAt', 'DESC']
         ],
-        order: [['createdAt', 'DESC']],
     });
+
+    const salesHistory = orders.flatMap(order =>
+        order.orderItems.map(item => ({
+            id: order.id + '-' + item.productId,
+            timestamp: order.createdAt,
+            productName: item.Product ? item.Product.name : 'Produto Deletado',
+            category: item.Product && item.Product.category ? item.Product.category.name : 'Sem Categoria',
+            quantity: item.quantity,
+            unit: item.Product ? item.Product.unit : '',
+            price: parseFloat(item.price),
+            total: item.quantity * parseFloat(item.price),
+        }))
+    );
 
     res.status(200).json({
         status: 'success',
-        results: orders.length,
+        results: salesHistory.length,
         data: {
-            orders,
+            sales: salesHistory,
         },
     });
 });
 
-// Atualizar status do pedido (para Admin ou Produtor do produto)
 exports.updateOrderStatus = catchAsync(async (req, res, next) => {
     const { status } = req.body;
 
@@ -199,33 +186,9 @@ exports.updateOrderStatus = catchAsync(async (req, res, next) => {
     if (!order) {
         return next(new AppError('Pedido não encontrado.', 404));
     }
-
-    // Autorização: Apenas ADMIN pode mudar o status de qualquer pedido.
-    // Ou, um PRODUTOR pode mudar o status DE SEUS PRODUTOS dentro do pedido.
-    // Para simplificar, vou permitir que admins mudem qualquer status.
-    // Produtores precisariam de uma lógica mais granular (ex: "marcar item como enviado")
+    
     if (req.user.role !== 'admin') {
-        // Lógica mais complexa para produtor:
-        // Verificar se o pedido contém produtos do produtor logado
-        const orderItemsForThisProducer = await OrderItem.findOne({
-            where: { orderId: order.id },
-            include: {
-                model: Product,
-                as: 'Product',
-                where: { userId: req.user.id }
-            }
-        });
-
-        if (!orderItemsForThisProducer) {
-             return next(new AppError('Você não tem permissão para atualizar o status deste pedido.', 403));
-        }
-
-        // Permitir que o produtor atualize status apenas para 'shipped' ou 'delivered' em seus produtos
-        // Se a mudança de status afeta o pedido inteiro, admin é o mais adequado.
-        // Para o MVP de faculdade, admin para status geral é mais simples.
-        // Se o produtor só puder mudar o status de SEUS itens no pedido, a lógica muda.
-        // Por agora, vamos manter mais simples: Admin muda status do pedido geral.
-        return next(new AppError('Você não tem permissão para atualizar o status global deste pedido. Apenas administradores podem fazer isso.', 403));
+         return next(new AppError('Você não tem permissão para atualizar o status deste pedido.', 403));
     }
 
     order.status = status;
@@ -233,14 +196,12 @@ exports.updateOrderStatus = catchAsync(async (req, res, next) => {
 
     res.status(200).json({
         status: 'success',
-        message: `Status do pedido ${order.id} atualizado para "${status}".`,
         data: {
             order,
         },
     });
 });
 
-// Cancelar Pedido (comprador pode cancelar se status for 'pending' ou 'processing')
 exports.cancelOrder = catchAsync(async (req, res, next) => {
     const order = await Order.findByPk(req.params.id);
 
@@ -248,19 +209,16 @@ exports.cancelOrder = catchAsync(async (req, res, next) => {
         return next(new AppError('Pedido não encontrado.', 404));
     }
 
-    // Somente o comprador pode cancelar seu próprio pedido
-    if (order.userId !== req.user.id && req.user.role !== 'admin') { // Admin também pode cancelar
+    if (order.userId !== req.user.id && req.user.role !== 'admin') {
         return next(new AppError('Você não tem permissão para cancelar este pedido.', 403));
     }
 
-    // Permite cancelar se o status for 'pending' ou 'processing'
-    if (order.status === 'pending' || order.status === 'processing') {
-        const transaction = await sequelize.transaction();
+    if (order.status !== 'delivered' && order.status !== 'cancelled') {
+        const transaction = await db.sequelize.transaction();
         try {
             order.status = 'cancelled';
             await order.save({ transaction });
 
-            // Reverter estoque dos produtos no pedido
             const orderItems = await OrderItem.findAll({
                 where: { orderId: order.id },
                 transaction
@@ -269,7 +227,7 @@ exports.cancelOrder = catchAsync(async (req, res, next) => {
             for (const item of orderItems) {
                 const product = await Product.findByPk(item.productId, { transaction });
                 if (product) {
-                    product.stock += item.quantity; // Adiciona o estoque de volta
+                    product.stock += item.quantity;
                     await product.save({ transaction });
                 }
             }
@@ -278,14 +236,13 @@ exports.cancelOrder = catchAsync(async (req, res, next) => {
 
             res.status(200).json({
                 status: 'success',
-                message: 'Pedido cancelado com sucesso e estoque revertido.',
+                message: 'Pedido cancelado e estoque revertido.',
                 data: {
                     order,
                 },
             });
         } catch (error) {
             await transaction.rollback();
-            console.error('Erro ao cancelar pedido e reverter estoque:', error);
             next(error);
         }
     } else {

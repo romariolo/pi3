@@ -1,9 +1,8 @@
-// middlewares/authMiddleware.js
 const jwt = require('jsonwebtoken');
 const { promisify } = require('util');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/AppError');
-const User = require('../models/user'); // <--- CORRIJA ESTA LINHA: era './models/User', agora é '../models/user' (e minúsculo)
+const User = require('../models/User');
 
 const protect = catchAsync(async (req, res, next) => {
     let token;

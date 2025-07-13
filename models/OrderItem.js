@@ -1,25 +1,21 @@
 const { DataTypes } = require('sequelize');
 
 module.exports = (sequelize) => {
-    const Review = sequelize.define('Review', {
+    const OrderItem = sequelize.define('OrderItem', {
         id: {
             type: DataTypes.INTEGER,
             autoIncrement: true,
             primaryKey: true,
         },
-        review: {
-            type: DataTypes.TEXT,
-            allowNull: false,
-        },
-        rating: {
+        quantity: {
             type: DataTypes.INTEGER,
             allowNull: false,
-            validate: {
-                min: 1,
-                max: 5,
-            },
+        },
+        price: {
+            type: DataTypes.DECIMAL(10, 2),
+            allowNull: false,
         },
     });
 
-    return Review;
+    return OrderItem;
 };
