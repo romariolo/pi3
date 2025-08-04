@@ -1,6 +1,6 @@
 const Review = require('../models/Review');
 const Product = require('../models/Product');
-const User = require('../models/user');
+const User = require('../models/User');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/AppError');
 

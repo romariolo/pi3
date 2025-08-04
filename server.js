@@ -14,12 +14,6 @@ const AppError = require('./utils/AppError');
 
 dotenv.config();
 
-const User = require('./models/User');
-const Category = require('./models/Category');
-const Product = require('./models/Product');
-const { Order, OrderItem } = require('./models/Order');
-const Review = require('./models/Review');
-
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -27,27 +21,6 @@ app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
-
-User.hasMany(Product, { foreignKey: 'userId', as: 'products' });
-User.hasMany(Order, { foreignKey: 'userId', as: 'orders' });
-User.hasMany(Review, { foreignKey: 'userId', as: 'reviews' });
-
-Category.hasMany(Product, { foreignKey: 'categoryId', as: 'products' });
-
-Product.belongsTo(User, { foreignKey: 'userId', as: 'producer' });
-Product.belongsTo(Category, { foreignKey: 'categoryId', as: 'category' });
-Product.hasMany(Review, { foreignKey: 'productId', as: 'reviews' });
-Product.hasMany(OrderItem, { foreignKey: 'productId' });
-
-
-Order.belongsTo(User, { foreignKey: 'userId', as: 'buyer' });
-Order.hasMany(OrderItem, { foreignKey: 'orderId', as: 'orderItems' });
-
-OrderItem.belongsTo(Order, { foreignKey: 'orderId' });
-OrderItem.belongsTo(Product, { as: 'Product', foreignKey: 'productId' });
-
-Review.belongsTo(User, { foreignKey: 'userId', as: 'user' });
-Review.belongsTo(Product, { foreignKey: 'productId', as: 'product' });
 
 app.get('/', (req, res) => {
     res.send('API do Marketplace de Comércio Local está rodando!');
